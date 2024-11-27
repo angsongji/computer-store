@@ -16,10 +16,10 @@ import dao.PhieuNhapDAO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.ServerSocket;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import dao.BaoHanhDAO;
 import dao.CTPhieuNhapDAO;
 import dto.CTPhieuNhapDTO;
-import dto.PhieuBaoHanhDTO;
-import dao.PhieuBaoHanhDAO;
+import dto.BaoHanhDTO;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Map;
@@ -31,7 +31,7 @@ public class API_Server extends NanoHTTPD {
 
         // Kiểm tra xem cổng đã được sử dụng chưa
         if (isPortInUse(port)) {
-           
+
         } else {
             start(SOCKET_READ_TIMEOUT, false); // Khởi chạy server
             System.out.println("API server started on port " + port);
@@ -41,7 +41,7 @@ public class API_Server extends NanoHTTPD {
 
     // Kiểm tra cổng có đang sử dụng không
     private boolean isPortInUse(int port) {
-        try ( ServerSocket serverSocket = new ServerSocket(port)) {
+        try (ServerSocket serverSocket = new ServerSocket(port)) {
             return false; // Cổng chưa bị chiếm dụng
         } catch (IOException e) {
             return true; // Cổng đã bị chiếm dụng
@@ -68,8 +68,9 @@ public class API_Server extends NanoHTTPD {
                 }
                 break;
 
-            case "/api/list-bao-hanh":
+            case "/api/bao-hanh":
                 if ("GET".equals(method)) {
+                    objectMapper.registerModule(new JavaTimeModule());
                     return handleGetBaoHanh(session, objectMapper);
                 }
                 break;
@@ -89,12 +90,12 @@ public class API_Server extends NanoHTTPD {
         );
 
     }
-
+    Map<String, Object> response = new HashMap<>();
     private Response handleGetPhieuNhap(ObjectMapper objectMapper) {
         try {
             PhieuNhapDAO pnDAO = new PhieuNhapDAO();
             ArrayList<PhieuNhapDTO> pnList = pnDAO.list();
-            Map<String, Object> response = new HashMap<>();
+
             response.put("data", pnList);
             response.put("status", 200);
             response.put("message", "Lấy danh sách phiếu nhập thành công");
@@ -127,32 +128,48 @@ public class API_Server extends NanoHTTPD {
     }
 
     private Response handleGetBaoHanh(IHTTPSession session, ObjectMapper objectMapper) {
+    try {
+        BaoHanhDAO pbhDAO = new BaoHanhDAO();
+        ArrayList<BaoHanhDTO> pbhList = pbhDAO.list();
+        // Lấy tham số từ query
+        LocalDate ngayBaoHanh = parseDateParam(session.getParms().get("ngayBaoHanh"));
+        LocalDate ngayTraMay = parseDateParam(session.getParms().get("ngayTraMay"));
+        String idBaoHanh = session.getParms().get("idBaoHanh");
+        String idKhachHang = session.getParms().get("idKhachHang");
+
+        // Lọc danh sách theo điều kiện
+        pbhList.removeIf(pbh
+                -> (idBaoHanh != null && !idBaoHanh.isEmpty() && !pbh.getIdBaoHanh().equals(idBaoHanh))
+                || (idKhachHang != null && !idKhachHang.isEmpty() && !pbh.getIdKhachHang().equals(idKhachHang))
+                || (ngayBaoHanh != null && !pbh.getNgayBaoHanh().equals(ngayBaoHanh))
+                || (ngayTraMay != null && !pbh.getNgayTraMay().equals(ngayTraMay))
+        );
+        HashMap<String, Object> response = new HashMap<>();
+        response.put("data", pbhList);
+        response.put("status", 200);
+        if (pbhList.isEmpty()) {
+            response.put("message", "Không có dữ liệu phù hợp");
+        } else {
+            response.put("message", "Lấy danh sách bảo hành thành công");
+        }
+        // Chuyển danh sách thành JSON
+        String jsonResponse = objectMapper.writeValueAsString(response);
+        return newFixedLengthResponse(Response.Status.OK, "application/json", jsonResponse);
+    } catch (Exception e) {
+        e.printStackTrace();
+        System.err.println("aaaaaaaa");
+        // Trả về lỗi 500 và thông tin chi tiết về lỗi trong response
+        HashMap<String, Object> errorResponse = new HashMap<>();
+        errorResponse.put("status", 500);
+        errorResponse.put("message", e.getMessage()); // Xuất thông tin lỗi chi tiết
         try {
-            PhieuBaoHanhDAO pbhDAO = new PhieuBaoHanhDAO();
-            ArrayList<PhieuBaoHanhDTO> pbhList = pbhDAO.list();
-
-            // Lấy tham số từ query
-            LocalDate ngayMua = parseDateParam(session.getParms().get("ngayMua"));
-            LocalDate ngayHetHan = parseDateParam(session.getParms().get("ngayHetHan"));
-            String idHoaDon = session.getParms().get("idHoaDon");
-            String idKhachHang = session.getParms().get("idKhachHang");
-
-            // Lọc danh sách theo điều kiện
-            pbhList.removeIf(pbh
-                    -> (idHoaDon != null && !idHoaDon.isEmpty() && !pbh.getIdHoaDon().equals(idHoaDon))
-                    || (idKhachHang != null && !idKhachHang.isEmpty() && !pbh.getIdKhachHang().equals(idKhachHang))
-                    || (ngayMua != null && !pbh.getNgayMua().equals(ngayMua))
-                    || (ngayHetHan != null && !pbh.getNgayHetHan().equals(ngayHetHan))
-            );
-
-            // Chuyển danh sách thành JSON
-            String jsonResponse = objectMapper.writeValueAsString(pbhList);
-            return newFixedLengthResponse(Response.Status.OK, "application/json", jsonResponse);
-        } catch (IOException e) {
-            e.printStackTrace();
+            String errorJson = objectMapper.writeValueAsString(errorResponse);
+            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json", errorJson);
+        } catch (IOException ioException) {
             return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "500 Internal Server Error");
         }
     }
+}
 
     private LocalDate parseDateParam(String dateStr) {
         if (dateStr == null || dateStr.isEmpty()) {
